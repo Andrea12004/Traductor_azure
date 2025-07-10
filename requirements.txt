@@ -1,10 +1,7 @@
 fastapi
 uvicorn
 gTTS
-mediapipe
 numpy
-opencv-python
-opencv-contrib-python
 pandas
 pygame
 tensorflow
