@@ -4,8 +4,8 @@ gTTS
 numpy
 pandas
 pygame
-tensorflow==2.10.1
-keras==2.10.0
+tensorflow==2.9.1
+keras==2.9.0
 Flask
 protobuf
 tables
