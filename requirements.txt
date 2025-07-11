@@ -4,12 +4,13 @@ gTTS
 numpy
 pandas
 pygame
-tensorflow==2.12.0
-keras
+tensorflow==2.10.1
+keras==2.10.0
 Flask
 protobuf
 tables
 PyQt5
 opencv-python==4.8.1.78
 mediapipe==0.10.11
+
 
