@@ -9,7 +9,7 @@ from typing import Optional
 import logging
 
 # Importar tu lógica
-from evaluar_procesador import process_frame_simple
+from app.evaluar_procesador import process_frame_simple
 
 # Configurar logging
 logging.basicConfig(level=logging.INFO)
