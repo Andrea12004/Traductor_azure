@@ -6,7 +6,7 @@ from mediapipe.python.solutions.drawing_utils import draw_landmarks, DrawingSpec
 import numpy as np
 import pandas as pd
 from typing import NamedTuple
-from constants import *
+from utils.constants import *
 
 # GENERAL
 def mediapipe_detection(image, model):
