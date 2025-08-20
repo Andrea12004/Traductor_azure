@@ -6,7 +6,13 @@ import numpy as np
 from mediapipe.python.solutions.holistic import Holistic
 from keras.models import load_model
 from utils.helpers import *
-from utils.constants import *
+from utils.constants import (
+    MODEL_STATIC_PATH, 
+    MODEL_PATH, 
+    WORDS_JSON_PATH,
+    MODEL_FRAMES_STATIC,
+    # otras que necesites
+)
 # from text_to_speech import text_to_speech  # Lo comentamos para la API
 
 # ---------- CONFIGURACIÓN  ----------
