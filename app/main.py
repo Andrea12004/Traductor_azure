@@ -1,48 +1,124 @@
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+import cv2
 import numpy as np
-from keras.models import load_model
-from app.utils.constants import MODEL_PATH, WORDS_JSON_PATH, MODEL_FRAMES
-from app.utils.helpers import get_word_ids, words_text
-from tensorflow.keras.preprocessing.sequence import pad_sequences
+import base64
+import uuid
+from typing import Optional
+import logging
 
-app = FastAPI()
+# Importar tu lógica
+from evaluar_procesador import process_frame_simple
 
-# Cargar el modelo una sola vez
-model = load_model(MODEL_PATH)
-word_ids = get_word_ids(WORDS_JSON_PATH)
+# Configurar logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-class KeypointsInput(BaseModel):
-    keypoints: list
+app = FastAPI(title="Traductor LSC API", version="1.0.0")
+
+# CORS para React Native
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Variables globales para sesiones simples
+sessions = {}
+
+# Modelo para recibir frames
+class FrameData(BaseModel):
+    frame_base64: str
+
+# Modelo para respuestas
+class WordResponse(BaseModel):
+    success: bool
+    word: Optional[str] = None
+    confidence: Optional[float] = None
+    type: Optional[str] = None  # "static" o "dynamic"
+    message: str
 
 @app.get("/")
-def root():
-    return {"message": "API de predicción funcionando"}
+async def root():
+    return {"message": "API Traductor LSC funcionando"}
 
-@app.post("/predecir/")
-def predecir_keypoints(data: KeypointsInput):
+@app.get("/health")
+async def health():
+    return {"status": "healthy"}
+
+@app.post("/start_session")
+async def start_session():
+    """Crear nueva sesión"""
+    session_id = str(uuid.uuid4())
+    sessions[session_id] = {"frames_count": 0}
+    
+    logger.info(f"Nueva sesión: {session_id}")
+    return {
+        "success": True,
+        "session_id": session_id,
+        "message": "Sesión iniciada"
+    }
+
+@app.post("/process_frame/{session_id}")
+async def process_frame_endpoint(session_id: str, frame_data: FrameData) -> WordResponse:
+    """Procesar frame de React Native"""
+    
+    if session_id not in sessions:
+        raise HTTPException(status_code=404, detail="Sesión no encontrada")
+    
     try:
-        if not data.keypoints:
-            raise HTTPException(status_code=400, detail="Lista de keypoints vacía")
-
-        # Asegurarse que la entrada tenga longitud adecuada
-        keypoints = data.keypoints
-        if len(keypoints) < MODEL_FRAMES:
-            # Rellenar con ceros si tiene menos de los frames requeridos
-            padding = [ [0]*len(keypoints[0]) ] * (MODEL_FRAMES - len(keypoints))
-            keypoints.extend(padding)
-        else:
-            keypoints = keypoints[:MODEL_FRAMES]
-
-        keypoints_np = np.array([keypoints])
-        result = model.predict(keypoints_np)[0]
-        max_index = np.argmax(result)
-        palabra = words_text.get(word_ids[max_index].split('-')[0])
-
-        return {
-            "prediccion": palabra,
-            "confianza": float(result[max_index])
-        }
-
+        # Decodificar frame de base64
+        frame_bytes = base64.b64decode(frame_data.frame_base64)
+        frame_array = np.frombuffer(frame_bytes, dtype=np.uint8)
+        frame = cv2.imdecode(frame_array, cv2.IMREAD_COLOR)
+        
+        if frame is None:
+            return WordResponse(
+                success=False,
+                message="Frame inválido"
+            )
+        
+        # AQUÍ LLAMAS A TU FUNCIÓN ORIGINAL
+        result = process_frame_simple(frame)
+        
+        sessions[session_id]["frames_count"] += 1
+        
+        return WordResponse(
+            success=True,
+            word=result.get("word"),
+            confidence=result.get("confidence"),
+            type=result.get("type"),
+            message=result.get("message", "Frame procesado")
+        )
+        
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Error procesando frame: {e}")
+        return WordResponse(
+            success=False,
+            message=f"Error: {str(e)}"
+        )
+
+@app.post("/clear_session/{session_id}")
+async def clear_session(session_id: str):
+    """Limpiar sesión"""
+    if session_id not in sessions:
+        raise HTTPException(status_code=404, detail="Sesión no encontrada")
+    
+    # Aquí puedes llamar una función para limpiar el estado si es necesario
+    return {"success": True, "message": "Sesión limpiada"}
+
+@app.delete("/end_session/{session_id}")
+async def end_session(session_id: str):
+    """Terminar sesión"""
+    if session_id not in sessions:
+        raise HTTPException(status_code=404, detail="Sesión no encontrada")
+    
+    del sessions[session_id]
+    return {"success": True, "message": "Sesión terminada"}
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)

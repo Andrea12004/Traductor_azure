@@ -6,6 +6,7 @@ MIN_LENGTH_FRAMES = 10  # M�nima cantidad de frames necesarios
 MODEL_FRAMES = 40  # Cantidad de frames normalizados para el modelo
 LENGTH_KEYPOINTS = 258 # Cantidad de keypoints usados en el modelo
 
+
 # RUTAS PRINCIPALES
 ROOT_PATH = os.getcwd()
 FRAME_ACTIONS_PATH = os.path.join(ROOT_PATH, "frame_actions")
@@ -23,6 +24,14 @@ FONT = cv2.FONT_HERSHEY_PLAIN
 FONT_SIZE = 1.5
 FONT_POS = (5, 30)
 
+# Parámetros para ESTÁTICO
+MIN_LENGTH_FRAMES_STATIC = 5    # frames mínimos para considerar la seña
+MODEL_FRAMES_STATIC = 40        # número de frames normalizados para el modelo estático
+LENGTH_KEYPOINTS_STATIC = 258   # cantidad de keypoints usados
+MODEL_STATIC_PATH = os.path.join(MODEL_FOLDER_PATH, "static_letters_model.keras")
+LETTERS_JSON_PATH = os.path.join(MODEL_FOLDER_PATH, "words.json")
+
+
 
 words_text = {
     "gracias": "GRACIAS",
@@ -31,4 +40,9 @@ words_text = {
     "Buenos_dias":"BUENOS DIAS",
     "Buenas_tardes":"BUENAS TARDES",
     "Buenas_noches":"BUENAS NOCHES",
+    "A":"A",
+    "B":"B",
+    "C":"C",
+    "D":"D",
+    "E":"E",
 }

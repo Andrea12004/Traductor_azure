@@ -1,4 +1,4 @@
-import json
+﻿import json
 import os
 import cv2
 from mediapipe.python.solutions.holistic import POSE_CONNECTIONS, HAND_CONNECTIONS
@@ -6,8 +6,7 @@ from mediapipe.python.solutions.drawing_utils import draw_landmarks, DrawingSpec
 import numpy as np
 import pandas as pd
 from typing import NamedTuple
-from app.utils.constants import *
-
+from constants import *
 
 # GENERAL
 def mediapipe_detection(image, model):
@@ -113,3 +112,43 @@ def get_sequences_and_labels(words_id):
             labels.append(word_index)
                     
     return sequences, labels
+
+def get_single_hand_keypoints(holistic, image_path):
+    """Devuelve keypoints de UNA sola mano (derecha si existe, si no izquierda)."""
+    import cv2
+    import numpy as np
+    image = cv2.imread(image_path)
+    if image is None:
+        return None
+    image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    results = holistic.process(image_rgb)
+
+    # Elegir mano: primero derecha, si no hay tomar izquierda
+    hand_landmarks = results.right_hand_landmarks or results.left_hand_landmarks
+    if not hand_landmarks:
+        return None
+
+    hand_points = np.array([[lm.x, lm.y, lm.z] for lm in hand_landmarks.landmark], dtype=np.float32).flatten()
+    return hand_points
+
+
+
+# helpers.py
+import numpy as np
+
+def extract_single_hand_keypoints(results, hand='right'):
+    """
+    Extrae los 21 keypoints de UNA mano (izquierda o derecha) como vector plano (63 valores).
+    Si no se detecta la mano, devuelve ceros.
+    """
+    if hand == 'right':
+        hand_landmarks = results.right_hand_landmarks
+    else:
+        hand_landmarks = results.left_hand_landmarks
+    
+    if hand_landmarks:
+        return np.array([[lm.x, lm.y, lm.z] for lm in hand_landmarks.landmark]).flatten()
+    else:
+        return np.zeros(21*3, dtype=np.float32)
+
+
