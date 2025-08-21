@@ -1,21 +1,21 @@
 import os
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+import asyncio
+import json
+import base64
 import cv2
 import numpy as np
-import base64
-import uuid
-from typing import Optional
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
 import logging
 
-# Configurar logging
+# Tu lógica de procesamiento
+from app.evaluar_procesador import SignLanguageProcessor
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="Traductor LSC API", version="1.0.0")
+app = FastAPI(title="Traductor LSC WebSocket API", version="3.0.0")
 
-# CORS para React Native
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -24,119 +24,106 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Variables globales para sesiones simples
-sessions = {}
+# Almacenar conexiones activas
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: dict = {}
+        self.processors: dict = {}
 
-# Variable para lazy loading del procesador
-_processor_loaded = False
+    async def connect(self, websocket: WebSocket, client_id: str):
+        await websocket.accept()
+        self.active_connections[client_id] = websocket
+        self.processors[client_id] = SignLanguageProcessor()
+        logger.info(f"Cliente {client_id} conectado")
 
-def load_processor():
-    """Cargar el procesador solo cuando sea necesario"""
-    global _processor_loaded
-    if not _processor_loaded:
-        try:
-            # Importar tu lógica aquí, no al inicio
-            from app.evaluar_procesador import process_frame_simple
-            globals()['process_frame_simple'] = process_frame_simple
-            _processor_loaded = True
-            logger.info("Procesador cargado exitosamente")
-        except Exception as e:
-            logger.error(f"Error cargando procesador: {e}")
-            raise e
+    def disconnect(self, client_id: str):
+        if client_id in self.active_connections:
+            del self.active_connections[client_id]
+        if client_id in self.processors:
+            del self.processors[client_id]
+        logger.info(f"Cliente {client_id} desconectado")
 
-# Modelo para recibir frames
-class FrameData(BaseModel):
-    frame_base64: str
+    async def send_personal_message(self, message: dict, client_id: str):
+        if client_id in self.active_connections:
+            try:
+                await self.active_connections[client_id].send_text(json.dumps(message))
+            except Exception as e:
+                logger.error(f"Error enviando mensaje a {client_id}: {e}")
+                self.disconnect(client_id)
 
-# Modelo para respuestas
-class WordResponse(BaseModel):
-    success: bool
-    word: Optional[str] = None
-    confidence: Optional[float] = None
-    type: Optional[str] = None  # "static" o "dynamic"
-    message: str
+manager = ConnectionManager()
 
 @app.get("/")
 async def root():
-    return {"message": "API Traductor LSC funcionando", "status": "ready"}
+    return {"message": "Traductor LSC WebSocket API", "status": "running"}
 
 @app.get("/health")
 async def health():
-    """Health check rápido - no carga dependencias pesadas"""
-    return {"status": "healthy", "service": "traductor-api"}
+    return {"status": "healthy", "connections": len(manager.active_connections)}
 
-@app.post("/start_session")
-async def start_session():
-    """Crear nueva sesión"""
-    session_id = str(uuid.uuid4())
-    sessions[session_id] = {"frames_count": 0}
-    
-    logger.info(f"Nueva sesión: {session_id}")
-    return {
-        "success": True,
-        "session_id": session_id,
-        "message": "Sesión iniciada"
-    }
-
-@app.post("/process_frame/{session_id}")
-async def process_frame_endpoint(session_id: str, frame_data: FrameData) -> WordResponse:
-    """Procesar frame de React Native"""
-    
-    if session_id not in sessions:
-        raise HTTPException(status_code=404, detail="Sesión no encontrada")
+@app.websocket("/ws/{client_id}")
+async def websocket_endpoint(websocket: WebSocket, client_id: str):
+    await manager.connect(websocket, client_id)
     
     try:
-        # Cargar el procesador solo cuando sea necesario
-        load_processor()
-        
-        # Decodificar frame de base64
-        frame_bytes = base64.b64decode(frame_data.frame_base64)
-        frame_array = np.frombuffer(frame_bytes, dtype=np.uint8)
-        frame = cv2.imdecode(frame_array, cv2.IMREAD_COLOR)
-        
-        if frame is None:
-            return WordResponse(
-                success=False,
-                message="Frame inválido"
-            )
-        
-        # AQUÍ LLAMAS A TU FUNCIÓN ORIGINAL
-        result = process_frame_simple(frame)
-        
-        sessions[session_id]["frames_count"] += 1
-        
-        return WordResponse(
-            success=True,
-            word=result.get("word"),
-            confidence=result.get("confidence"),
-            type=result.get("type"),
-            message=result.get("message", "Frame procesado")
-        )
-        
+        while True:
+            # Recibir mensaje del cliente
+            data = await websocket.receive_text()
+            message = json.loads(data)
+            
+            message_type = message.get("type")
+            
+            if message_type == "frame":
+                # Procesar frame
+                frame_data = message.get("data")
+                if frame_data:
+                    try:
+                        # Decodificar frame
+                        frame_bytes = base64.b64decode(frame_data)
+                        frame_array = np.frombuffer(frame_bytes, dtype=np.uint8)
+                        frame = cv2.imdecode(frame_array, cv2.IMREAD_COLOR)
+                        
+                        if frame is not None:
+                            # Procesar con tu lógica
+                            processor = manager.processors[client_id]
+                            result = processor.process_frame(frame)
+                            
+                            # Enviar resultado
+                            await manager.send_personal_message({
+                                "type": "prediction",
+                                "data": result,
+                                "timestamp": message.get("timestamp")
+                            }, client_id)
+                        
+                    except Exception as e:
+                        await manager.send_personal_message({
+                            "type": "error",
+                            "message": f"Error procesando frame: {str(e)}"
+                        }, client_id)
+            
+            elif message_type == "clear":
+                # Limpiar oración
+                if client_id in manager.processors:
+                    manager.processors[client_id].clear_sentence()
+                    await manager.send_personal_message({
+                        "type": "cleared",
+                        "message": "Oración limpiada"
+                    }, client_id)
+            
+            elif message_type == "status":
+                # Obtener estado completo
+                if client_id in manager.processors:
+                    status = manager.processors[client_id].get_full_status()
+                    await manager.send_personal_message({
+                        "type": "status",
+                        "data": status
+                    }, client_id)
+                    
+    except WebSocketDisconnect:
+        manager.disconnect(client_id)
     except Exception as e:
-        logger.error(f"Error procesando frame: {e}")
-        return WordResponse(
-            success=False,
-            message=f"Error: {str(e)}"
-        )
-
-@app.post("/clear_session/{session_id}")
-async def clear_session(session_id: str):
-    """Limpiar sesión"""
-    if session_id not in sessions:
-        raise HTTPException(status_code=404, detail="Sesión no encontrada")
-    
-    # Aquí puedes llamar una función para limpiar el estado si es necesario
-    return {"success": True, "message": "Sesión limpiada"}
-
-@app.delete("/end_session/{session_id}")
-async def end_session(session_id: str):
-    """Terminar sesión"""
-    if session_id not in sessions:
-        raise HTTPException(status_code=404, detail="Sesión no encontrada")
-    
-    del sessions[session_id]
-    return {"success": True, "message": "Sesión terminada"}
+        logger.error(f"Error en WebSocket {client_id}: {e}")
+        manager.disconnect(client_id)
 
 if __name__ == "__main__":
     import uvicorn

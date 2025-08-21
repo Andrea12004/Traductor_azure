@@ -8,3 +8,4 @@ pydantic
 python-multipart
 pandas
 protobuf==3.20.*
+websockets
