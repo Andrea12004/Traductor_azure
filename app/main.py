@@ -1,3 +1,4 @@
+import os
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -7,9 +8,6 @@ import base64
 import uuid
 from typing import Optional
 import logging
-
-# Importar tu lógica
-from app.evaluar_procesador import process_frame_simple
 
 # Configurar logging
 logging.basicConfig(level=logging.INFO)
@@ -29,6 +27,23 @@ app.add_middleware(
 # Variables globales para sesiones simples
 sessions = {}
 
+# Variable para lazy loading del procesador
+_processor_loaded = False
+
+def load_processor():
+    """Cargar el procesador solo cuando sea necesario"""
+    global _processor_loaded
+    if not _processor_loaded:
+        try:
+            # Importar tu lógica aquí, no al inicio
+            from app.evaluar_procesador import process_frame_simple
+            globals()['process_frame_simple'] = process_frame_simple
+            _processor_loaded = True
+            logger.info("Procesador cargado exitosamente")
+        except Exception as e:
+            logger.error(f"Error cargando procesador: {e}")
+            raise e
+
 # Modelo para recibir frames
 class FrameData(BaseModel):
     frame_base64: str
@@ -43,11 +58,12 @@ class WordResponse(BaseModel):
 
 @app.get("/")
 async def root():
-    return {"message": "API Traductor LSC funcionando"}
+    return {"message": "API Traductor LSC funcionando", "status": "ready"}
 
 @app.get("/health")
 async def health():
-    return {"status": "healthy"}
+    """Health check rápido - no carga dependencias pesadas"""
+    return {"status": "healthy", "service": "traductor-api"}
 
 @app.post("/start_session")
 async def start_session():
@@ -70,6 +86,9 @@ async def process_frame_endpoint(session_id: str, frame_data: FrameData) -> Word
         raise HTTPException(status_code=404, detail="Sesión no encontrada")
     
     try:
+        # Cargar el procesador solo cuando sea necesario
+        load_processor()
+        
         # Decodificar frame de base64
         frame_bytes = base64.b64decode(frame_data.frame_base64)
         frame_array = np.frombuffer(frame_bytes, dtype=np.uint8)
@@ -121,4 +140,5 @@ async def end_session(session_id: str):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run(app, host="0.0.0.0", port=port)
