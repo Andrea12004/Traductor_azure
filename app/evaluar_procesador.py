@@ -89,7 +89,167 @@ def extract_hand_keypoints(kp_frame):
     else:
         return np.zeros(mano_size, dtype="float32")
 
-# ---------- VARIABLES GLOBALES  ----------
+# ---------- CLASE PRINCIPAL  ----------
+class SignLanguageProcessor:
+    def __init__(self):
+        # Variables de instancia
+        self.sentence = []
+        self.kp_sequence = []  # Para acumular keypoints
+        self.previous_kp = None
+        self.static_counter = 0  # Contador de frames estáticos consecutivos
+        self.cooldown_counter = 0
+        self.hands_present = False
+        self.hands_were_present = False
+        
+        # Cargar modelos
+        print("Cargando modelos...")
+        self.word_static = load_static_labels(LETTERS_JSON_PATH)
+        self.word_ids = get_word_ids(WORDS_JSON_PATH)
+        self.model_static = load_model(MODEL_STATIC_PATH)
+        self.model_dynamic = load_model(MODEL_PATH)
+        self.holistic_model = Holistic()
+        print("Modelos cargados exitosamente")
+
+    def process_frame(self, frame, static_threshold=0.8, dynamic_threshold=0.7):
+        """Función principal para procesar cada frame"""
+        
+        # Tu lógica original de MediaPipe
+        results = mediapipe_detection(frame, self.holistic_model)
+        self.hands_present = there_hand(results)
+        
+        # Reducir cooldown
+        if self.cooldown_counter > 0:
+            self.cooldown_counter -= 1
+        
+        # Variable para retornar resultado
+        result = {"message": "Frame procesado", "word": None, "confidence": None, "type": None}
+        
+        if self.hands_present:
+            # ========= HAY MANOS EN CÁMARA  =========
+            self.hands_were_present = True
+            
+            # Extraer keypoints
+            kp_frame = extract_keypoints(results)
+            self.kp_sequence.append(kp_frame)
+            
+            # Calcular movimiento para determinar si es estática
+            movement = calculate_movement(kp_frame, self.previous_kp)
+            self.previous_kp = kp_frame.copy()
+            
+            # Contar frames estáticos
+            if movement < MOVEMENT_THRESHOLD:
+                self.static_counter += 1
+            else:
+                self.static_counter = 0  # Resetear si hay movimiento
+            
+            # ====== PREDICCIÓN ESTÁTICA ======
+            # Si llevamos suficientes frames quietos, predecir estática
+            if self.static_counter >= STATIC_FRAMES_REQUIRED and self.cooldown_counter == 0:
+                mano = extract_hand_keypoints(kp_frame)
+                
+                if np.max(mano) > 0:
+                    # Normalizar
+                    data = mano / np.max(mano)
+                    
+                    # Predicción estática
+                    res = self.model_static.predict(np.expand_dims(data, axis=0), verbose=0)[0]
+                    pred_idx = np.argmax(res)
+                    confidence = res[pred_idx]
+                    
+                    print(f"[ESTÁTICA] {self.word_static[pred_idx]} ({confidence*100:.2f}%)")
+                    
+                    if confidence >= static_threshold:
+                        sent = self.word_static[pred_idx]
+                        self.sentence.insert(0, sent)
+                        # text_to_speech(sent)  # Comentado para API
+                        self.cooldown_counter = PREDICTION_COOLDOWN
+                        
+                        # RETORNAR RESULTADO PARA LA API
+                        result = {
+                            "word": sent,
+                            "confidence": float(confidence),
+                            "type": "static", 
+                            "message": "Palabra estática detectada"
+                        }
+                        
+                # Resetear contador después de predicción
+                self.static_counter = 0
+        
+        else:
+            # ========= NO HAY MANOS EN CÁMARA  =========
+            self.static_counter = 0
+            self.previous_kp = None
+            
+            # Si había manos antes y ahora no → EVALUAR DINÁMICA
+            if self.hands_were_present and len(self.kp_sequence) >= DYNAMIC_MIN_FRAMES and self.cooldown_counter == 0:
+                print(f"[MANOS SALIERON] Evaluando {len(self.kp_sequence)} frames como DINÁMICA")
+                
+                try:
+                    # Normalizar secuencia
+                    kp_normalized = normalize_keypoints(self.kp_sequence, int(MODEL_FRAMES))
+                    
+                    # Predicción dinámica
+                    res = self.model_dynamic.predict(np.expand_dims(kp_normalized, axis=0), verbose=0)[0]
+                    pred_idx = np.argmax(res)
+                    confidence = res[pred_idx]
+                    
+                    # Obtener nombre de la palabra dinámica
+                    if pred_idx < len(self.word_ids):
+                        word_id = self.word_ids[pred_idx].split('-')[0]
+                        word_name = words_text.get(word_id, word_id) if 'words_text' in globals() else word_id
+                    else:
+                        word_name = f"Clase_{pred_idx}"
+                    
+                    print(f"[DINÁMICA] {word_name} ({confidence*100:.2f}%)")
+                    
+                    if confidence > dynamic_threshold and pred_idx < len(self.word_ids):
+                        word_id = self.word_ids[pred_idx].split('-')[0]
+                        sent = words_text.get(word_id, word_id)
+                        self.sentence.insert(0, sent)
+                        # text_to_speech(sent)  # Comentado para API
+                        self.cooldown_counter = PREDICTION_COOLDOWN
+                        
+                        # RETORNAR RESULTADO PARA LA API
+                        result = {
+                            "word": sent,
+                            "confidence": float(confidence),
+                            "type": "dynamic",
+                            "message": "Palabra dinámica detectada"
+                        }
+                        
+                except Exception as e:
+                    print(f"Error en predicción dinámica: {e}")
+            
+            # Resetear variables para próxima secuencia
+            self.hands_were_present = False
+            self.kp_sequence = []
+        
+        return result
+
+    def clear_sentence(self):
+        """Limpiar la oración (para cuando React Native lo pida)"""
+        self.sentence.clear()
+        print("Oración limpiada")
+
+    def get_sentence(self):
+        """Obtener la oración actual (si React Native la quiere)"""
+        return self.sentence.copy()
+    
+    def get_full_status(self):
+        """Obtener estado completo del procesador"""
+        return {
+            "sentence": self.sentence.copy(),
+            "hands_present": self.hands_present,
+            "static_counter": self.static_counter,
+            "cooldown_counter": self.cooldown_counter,
+            "frames_accumulated": len(self.kp_sequence)
+        }
+
+
+# ---------- FUNCIONES GLOBALES DE COMPATIBILIDAD (OPCIONAL)  ----------
+# Estas son para mantener compatibilidad con código que use las funciones globales
+
+# Variables globales para las funciones de compatibilidad
 sentence = []
 kp_sequence = []  # Para acumular keypoints
 previous_kp = None
@@ -98,18 +258,17 @@ cooldown_counter = 0
 hands_present = False
 hands_were_present = False
 
-# Cargar modelos al inicio 
-print("Cargando modelos...")
+# Cargar modelos globales (para compatibilidad)
+print("Cargando modelos globales...")
 word_static = load_static_labels(LETTERS_JSON_PATH)
 word_ids = get_word_ids(WORDS_JSON_PATH)
 model_static = load_model(MODEL_STATIC_PATH)
 model_dynamic = load_model(MODEL_PATH)
 holistic_model = Holistic()
-print("Modelos cargados exitosamente")
+print("Modelos globales cargados exitosamente")
 
-# ---------- FUNCIÓN PRINCIPAL  ----------
 def process_frame_simple(frame, static_threshold=0.8, dynamic_threshold=0.7):
-
+    """Función global para compatibilidad con código existente"""
     global sentence, kp_sequence, previous_kp, static_counter, cooldown_counter
     global hands_present, hands_were_present
     
