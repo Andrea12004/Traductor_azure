@@ -4,11 +4,8 @@ opencv-python-headless
 mediapipe
 tensorflow
 numpy
-pydantic
-python-multipart
 pandas
 protobuf==3.20.*
 websockets
-pillow
-python-json-logger
-aiofiles
+keras
+
