@@ -1,6 +1,5 @@
 import os
 os.environ["CUDA_VISIBLE_DEVICES"] = "-1"  # Forzar CPU en Render
-
 from fastapi import FastAPI, File, UploadFile, Body
 from fastapi.middleware.cors import CORSMiddleware
 import numpy as np
@@ -41,3 +40,12 @@ async def process_base64(data: dict = Body(...)):
         return processor.process_frame(frame)
     except Exception as e:
         return {"error": str(e)}
+
+@app.get("/")
+def read_root():
+    return {
+        "status": "ok",
+        "message": "API funcionando correctamente",
+        "endpoints": ["/process_frame", "/process_base64", "/docs"]
+    }
+
