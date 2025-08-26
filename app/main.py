@@ -9,7 +9,7 @@ from app.evaluar_procesador import SignLanguageProcessor
 
 app = FastAPI()
 
-# Permitir peticiones desde cualquier origen (ajusta en producción)
+# Permitir peticiones desde cualquier origen 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
