@@ -8,4 +8,6 @@ pandas
 protobuf==3.20.*
 websockets
 keras
+python-multipart
+
 
