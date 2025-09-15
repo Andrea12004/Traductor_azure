@@ -3,11 +3,13 @@ uvicorn[standard]
 opencv-python-headless
 mediapipe
 tensorflow
+tensorflow-cpu 
 numpy
 pandas
 protobuf==3.20.*
 websockets
 keras
 python-multipart
+azure-storage-blob
 
 
