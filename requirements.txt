@@ -11,5 +11,5 @@ websockets
 keras
 python-multipart
 azure-storage-blob
-
+requests
 
