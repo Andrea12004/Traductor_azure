@@ -1,0 +1,33 @@
+{
+  "word_ids": [
+    "gracias",
+    "como_estas",
+    "hola",
+    "Buenos_dias",
+    "Buenas_tardes",
+    "Buenas_noches"
+  ],
+  "word_static": [
+    "A",
+    "B",
+    "C",
+    "D",
+    "E",
+    "F",
+    "I",
+    "L",
+    "M",
+    "N",
+    "O",
+    "P",
+    "Q",
+    "R",
+    "T",
+    "U",
+    "V",
+    "W",
+    "X",
+    "Y",
+    "K"
+  ]
+}
